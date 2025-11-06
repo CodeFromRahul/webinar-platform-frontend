@@ -1,11 +1,27 @@
-import crypto from 'crypto';
+import { StreamClient } from '@stream-io/node-sdk';
 
 const API_KEY = process.env.NEXT_PUBLIC_GETSTREAM_API_KEY!;
 const API_SECRET = process.env.GETSTREAM_API_SECRET!;
-const API_URL = 'https://video.stream-io-api.com/api/v1';
+
+// Initialize Stream client
+let client: StreamClient | null = null;
+
+function getStreamClient(): StreamClient {
+  if (!client) {
+    if (!API_KEY || !API_SECRET) {
+      throw new Error('GetStream credentials not configured. Please set NEXT_PUBLIC_GETSTREAM_API_KEY and GETSTREAM_API_SECRET in your .env file.');
+    }
+    
+    // Correct initialization with object containing apiKey and secret
+    client = new StreamClient({
+      apiKey: API_KEY,
+      secret: API_SECRET,
+    });
+  }
+  return client;
+}
 
 export interface WebinarCreatePayload {
-  call_type: 'livestream';
   id: string;
   title?: string;
   description?: string;
@@ -19,96 +35,77 @@ export interface WebinarResponse {
     type: string;
     created_at: string;
     updated_at: string;
-    created_by_user_id: string;
-    backstage: boolean;
+    created_by: {
+      id: string;
+      name?: string;
+    };
+    backstage: {
+      enabled: boolean;
+    };
   };
 }
 
-// Generate JWT token for client (user-specific)
-export function generateUserToken(userId: string, expiresIn: number = 3600): string {
-  if (!API_SECRET) {
-    throw new Error('GETSTREAM_API_SECRET is not configured');
+// Generate JWT token for user
+export function generateUserToken(userId: string, expiresIn?: number): string {
+  try {
+    const streamClient = getStreamClient();
+    
+    // If expiresIn is provided, use it (in seconds)
+    if (expiresIn) {
+      const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
+      return streamClient.createToken(userId, expiresAt);
+    }
+    
+    // Otherwise, create token without expiration
+    return streamClient.createToken(userId);
+  } catch (error) {
+    console.error('Failed to generate user token:', error);
+    throw error;
   }
-
-  const iat = Math.floor(Date.now() / 1000);
-  const exp = iat + expiresIn;
-
-  const header = {
-    alg: 'HS256',
-    typ: 'JWT',
-  };
-
-  const payload = {
-    user_id: userId,
-    iss: 'stream',
-    sub: `user/${userId}`,
-    iat,
-    exp,
-  };
-
-  const headerEncoded = Buffer.from(JSON.stringify(header)).toString('base64url');
-  const payloadEncoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const signature = crypto
-    .createHmac('sha256', API_SECRET)
-    .update(`${headerEncoded}.${payloadEncoded}`)
-    .digest('base64url');
-
-  return `${headerEncoded}.${payloadEncoded}.${signature}`;
 }
 
-// Create webinar server-side
+// Create webinar/livestream call
 export async function createWebinar(
   payload: WebinarCreatePayload
 ): Promise<WebinarResponse> {
-  if (!API_KEY || !API_SECRET) {
-    throw new Error('GetStream credentials not configured');
-  }
-
-  const url = `${API_URL}/calls/${payload.call_type}/${payload.id}`;
-  
-  // Generate server-side auth token
-  const token = generateUserToken(payload.created_by_user_id);
-
   try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'Stream-Auth-Type': 'jwt',
-      },
-      body: JSON.stringify({
-        data: {
-          created_by: {
-            id: payload.created_by_user_id,
-            name: `User ${payload.created_by_user_id}`,
+    const streamClient = getStreamClient();
+    
+    // Create a livestream call using correct API
+    const call = streamClient.video.call('livestream', payload.id);
+    
+    await call.getOrCreate({
+      data: {
+        created_by_id: payload.created_by_user_id,
+        settings_override: {
+          backstage: {
+            enabled: true,
           },
-          members: [
-            {
-              user_id: payload.created_by_user_id,
-              role: 'host',
-            }
-          ],
-          custom: {
-            title: payload.title,
-            description: payload.description,
-          },
-          starts_at: payload.starts_at,
-          settings_override: {
-            backstage: {
-              enabled: true,
-            },
+          broadcasting: {
+            enabled: true,
           },
         },
-      }),
+        custom: {
+          title: payload.title || 'Untitled Webinar',
+          description: payload.description || '',
+        },
+        starts_at: payload.starts_at,
+      },
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`GetStream API error: ${response.statusText} - ${errorText}`);
-    }
+    // Get the call details
+    const callResponse = await call.get();
 
-    return response.json();
+    return {
+      call: {
+        id: callResponse.call.id,
+        type: callResponse.call.type,
+        created_at: callResponse.call.created_at,
+        updated_at: callResponse.call.updated_at,
+        created_by: callResponse.call.created_by,
+        backstage: callResponse.call.settings.backstage,
+      },
+    };
   } catch (error) {
     console.error('Failed to create webinar:', error);
     throw error;
@@ -117,29 +114,34 @@ export async function createWebinar(
 
 // Start webinar (go live from backstage)
 export async function startWebinar(
-  callType: string,
   callId: string,
   userId: string
 ): Promise<void> {
-  if (!API_KEY || !API_SECRET) {
-    throw new Error('GetStream credentials not configured');
+  try {
+    const streamClient = getStreamClient();
+    const call = streamClient.video.call('livestream', callId);
+
+    // Go live
+    await call.goLive();
+  } catch (error) {
+    console.error('Failed to start webinar:', error);
+    throw error;
   }
+}
 
-  const url = `${API_URL}/calls/${callType}/${callId}/go_live`;
-  const token = generateUserToken(userId);
+// Stop webinar
+export async function stopWebinar(
+  callId: string,
+  userId: string
+): Promise<void> {
+  try {
+    const streamClient = getStreamClient();
+    const call = streamClient.video.call('livestream', callId);
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-      'Stream-Auth-Type': 'jwt',
-    },
-    body: JSON.stringify({}),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to start webinar: ${response.statusText} - ${errorText}`);
+    // Stop live
+    await call.stopLive();
+  } catch (error) {
+    console.error('Failed to stop webinar:', error);
+    throw error;
   }
 }

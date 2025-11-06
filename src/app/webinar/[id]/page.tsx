@@ -2,10 +2,11 @@
 
 import Image from "next/image";
 import { useMemo, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { motion as m } from "framer-motion";
 import { toast } from "sonner";
+import { Video } from "lucide-react";
 
 function useWebinar(id: string) {
   const [item, setItem] = useState<any>(null);
@@ -34,6 +35,7 @@ function useCountdown(targetISO: string) {
 
 export default function WebinarLanding() {
   const params = useParams();
+  const router = useRouter();
   const id = params?.id as string;
   const data = useWebinar(id);
 
@@ -55,6 +57,14 @@ export default function WebinarLanding() {
   }, [dateTimeISO]);
 
   const { d, h, m, s, finished } = useCountdown(dateTimeISO);
+
+  const handleJoinLivestream = () => {
+    if (!data?.streamCallId) {
+      toast.error("Livestream not configured for this webinar");
+      return;
+    }
+    router.push(`/webinar/${id}/live`);
+  };
 
   if (!data) return (
     <m.div
@@ -83,39 +93,43 @@ export default function WebinarLanding() {
         >
           {finished ? "The webinar has started!" : "Seems like you are a little early"}
         </m.h2>
-        <m.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.1, duration: 0.4 }}
-          className="mx-auto grid grid-cols-4 gap-2 max-w-md mb-6"
-        >
-          {[
-            { label: 'Days', val: d },
-            { label: 'Hours', val: h },
-            { label: 'Minutes', val: m },
-            { label: 'Seconds', val: s }
-          ].map((b, i) => (
-            <m.div
-              key={b.label}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 + i * 0.05 }}
-              whileHover={{ scale: 1.05, backgroundColor: "rgba(139, 92, 246, 0.1)" }}
-              className="rounded-md bg-white/5 border border-white/10 p-3 transition-colors"
-            >
+        
+        {!finished && (
+          <m.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.1, duration: 0.4 }}
+            className="mx-auto grid grid-cols-4 gap-2 max-w-md mb-6"
+          >
+            {[
+              { label: 'Days', val: d },
+              { label: 'Hours', val: h },
+              { label: 'Minutes', val: m },
+              { label: 'Seconds', val: s }
+            ].map((b, i) => (
               <m.div
-                key={b.val}
-                initial={{ scale: 1 }}
-                animate={{ scale: [1, 1.1, 1] }}
-                transition={{ duration: 0.3 }}
-                className="text-2xl font-semibold tabular-nums"
+                key={b.label}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 + i * 0.05 }}
+                whileHover={{ scale: 1.05, backgroundColor: "rgba(139, 92, 246, 0.1)" }}
+                className="rounded-md bg-white/5 border border-white/10 p-3 transition-colors"
               >
-                {b.val.toString().padStart(2, '0')}
+                <m.div
+                  key={b.val}
+                  initial={{ scale: 1 }}
+                  animate={{ scale: [1, 1.1, 1] }}
+                  transition={{ duration: 0.3 }}
+                  className="text-2xl font-semibold tabular-nums"
+                >
+                  {b.val.toString().padStart(2, '0')}
+                </m.div>
+                <div className="text-xs text-white/60">{b.label}</div>
               </m.div>
-              <div className="text-xs text-white/60">{b.label}</div>
-            </m.div>
-          ))}
-        </m.div>
+            ))}
+          </m.div>
+        )}
+
         <m.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -131,19 +145,39 @@ export default function WebinarLanding() {
             unoptimized
           />
         </m.div>
-        <m.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          whileTap={{ scale: 0.98 }}
-        >
-          <Button
-            className="mb-5 bg-violet-600 hover:bg-violet-500"
-            onClick={() => toast.success("Reminder set! We'll notify you when the webinar starts.")}
+
+        {finished && data.streamCallId ? (
+          <m.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
+            whileTap={{ scale: 0.98 }}
+            className="mb-5"
           >
-            Get Reminder
-          </Button>
-        </m.div>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white font-semibold px-8 py-6 text-lg"
+              onClick={handleJoinLivestream}
+            >
+              <Video className="mr-2 h-5 w-5" />
+              Join Livestream
+            </Button>
+          </m.div>
+        ) : (
+          <m.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <Button
+              className="mb-5 bg-violet-600 hover:bg-violet-500"
+              onClick={() => toast.success("Reminder set! We'll notify you when the webinar starts.")}
+            >
+              Get Reminder
+            </Button>
+          </m.div>
+        )}
+
         <m.h3
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
