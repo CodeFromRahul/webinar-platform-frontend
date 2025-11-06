@@ -13,8 +13,11 @@ function getStreamClient(): StreamClient {
       throw new Error('GetStream credentials not configured. Please set NEXT_PUBLIC_GETSTREAM_API_KEY and GETSTREAM_API_SECRET in your .env file.');
     }
     
-    // Correct initialization: StreamClient takes two separate parameters
-    client = new StreamClient(API_KEY, API_SECRET);
+    // Correct initialization with object parameter
+    client = new StreamClient({
+      apiKey: API_KEY,
+      apiSecret: API_SECRET,
+    });
   }
   return client;
 }
@@ -41,7 +44,7 @@ export interface WebinarResponse {
 }
 
 // Generate JWT token for user using jose library
-export async function generateUserToken(userId: string, expiresIn: number = 3600): Promise<string> {
+export async function generateUserToken(userId: string, expiresIn: number = 7200): Promise<string> {
   try {
     if (!API_SECRET) {
       throw new Error('GETSTREAM_API_SECRET is not configured');
@@ -53,11 +56,9 @@ export async function generateUserToken(userId: string, expiresIn: number = 3600
 
     const token = await new SignJWT({
       user_id: userId,
-      iss: 'https://getstream.io',
-      sub: userId,
-      aud: API_KEY,
     })
       .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+      .setIssuer('stream-sdk')
       .setIssuedAt(issuedAt)
       .setExpirationTime(expirationTime)
       .sign(secret);
@@ -69,7 +70,7 @@ export async function generateUserToken(userId: string, expiresIn: number = 3600
   }
 }
 
-// Create webinar/livestream call using REST API
+// Create webinar/livestream call using SDK call.getOrCreate()
 export async function createWebinar(
   payload: WebinarCreatePayload
 ): Promise<WebinarResponse> {
@@ -79,28 +80,35 @@ export async function createWebinar(
     const callType = 'livestream';
     const callId = payload.id;
 
-    // Create call using REST API
-    const response = await streamClient.post(
-      `/video/call/${callType}/${callId}`,
-      {
-        data: {
-          created_by_id: payload.created_by_user_id,
-          settings_override: {
-            backstage: {
-              enabled: true,
-            },
-            broadcasting: {
-              enabled: true,
-            },
-          },
-          custom: {
-            title: payload.title || 'Untitled Webinar',
-            description: payload.description || '',
-          },
-          starts_at: payload.starts_at,
+    // Create call object
+    const call = streamClient.video.call(callType, callId);
+
+    // Use getOrCreate to create or fetch existing call
+    const response = await call.getOrCreate({
+      data: {
+        created_by_id: payload.created_by_user_id,
+        custom: {
+          title: payload.title || 'Untitled Webinar',
+          description: payload.description || '',
         },
-      }
-    );
+        starts_at: payload.starts_at,
+        settings_override: {
+          backstage: {
+            enabled: true,
+          },
+          broadcasting: {
+            enabled: true,
+            hls: {
+              auto_on: false,
+            },
+          },
+          recording: {
+            mode: 'available',
+            quality: 'high',
+          },
+        },
+      },
+    });
 
     return {
       call: {
@@ -112,11 +120,6 @@ export async function createWebinar(
       },
     };
   } catch (error: any) {
-    // If call already exists, try to get it
-    if (error?.code === 16 || error?.statusCode === 409) {
-      console.log('Call already exists, fetching existing call...');
-      return await getWebinar(payload.id);
-    }
     console.error('Failed to create webinar:', error);
     throw error;
   }
@@ -128,7 +131,8 @@ export async function getWebinar(callId: string): Promise<WebinarResponse> {
     const streamClient = getStreamClient();
     const callType = 'livestream';
 
-    const response = await streamClient.get(`/video/call/${callType}/${callId}`);
+    const call = streamClient.video.call(callType, callId);
+    const response = await call.get();
 
     return {
       call: {
@@ -147,14 +151,14 @@ export async function getWebinar(callId: string): Promise<WebinarResponse> {
 
 // Start webinar (go live from backstage)
 export async function startWebinar(
-  callId: string,
-  userId: string
+  callId: string
 ): Promise<void> {
   try {
     const streamClient = getStreamClient();
     const callType = 'livestream';
 
-    await streamClient.post(`/video/call/${callType}/${callId}/go_live`, {});
+    const call = streamClient.video.call(callType, callId);
+    await call.goLive();
   } catch (error) {
     console.error('Failed to start webinar:', error);
     throw error;
@@ -163,14 +167,14 @@ export async function startWebinar(
 
 // Stop webinar
 export async function stopWebinar(
-  callId: string,
-  userId: string
+  callId: string
 ): Promise<void> {
   try {
     const streamClient = getStreamClient();
     const callType = 'livestream';
 
-    await streamClient.post(`/video/call/${callType}/${callId}/stop_live`, {});
+    const call = streamClient.video.call(callType, callId);
+    await call.stopLive();
   } catch (error) {
     console.error('Failed to stop webinar:', error);
     throw error;
