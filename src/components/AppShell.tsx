@@ -7,6 +7,7 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupConte
 import { Home, Bot, Users, Settings, Zap, Plus } from "lucide-react";
 import { ReactNode, useState } from "react";
 import { WebinarModal } from "./WebinarModal";
+import { motion as m } from "framer-motion";
 
 export function AppShell({ children, title = "Home" }: { children: ReactNode; title?: string }) {
   const pathname = usePathname();
@@ -24,7 +25,11 @@ export function AppShell({ children, title = "Home" }: { children: ReactNode; ti
         <SidebarHeader className="px-4 py-4">
           <Link href="/" className="flex items-center gap-2">
             {/* Smartcast Professional Logo */}
-            <div className="h-9 w-9 grid place-items-center rounded-md bg-transparent">
+            <m.div
+              whileHover={{ scale: 1.05, rotate: 5 }}
+              whileTap={{ scale: 0.95 }}
+              className="h-9 w-9 grid place-items-center rounded-md bg-transparent"
+            >
               <svg viewBox="0 0 64 64" className="h-9 w-9" aria-label="Smartcast logo" role="img">
                 <defs>
                   <linearGradient id="sc-g" x1="0" y1="0" x2="1" y2="1">
@@ -38,7 +43,7 @@ export function AppShell({ children, title = "Home" }: { children: ReactNode; ti
                 <path d="M18 32c6-6 12-6 18 0" stroke="url(#sc-g)" strokeWidth="2" fill="none" strokeLinecap="round" opacity="0.7" />
                 <path d="M18 40c6-6 12-6 18 0" stroke="url(#sc-g)" strokeWidth="2" fill="none" strokeLinecap="round" opacity="0.45" />
               </svg>
-            </div>
+            </m.div>
             <div className="leading-tight">
               <div className="text-base font-semibold tracking-tight">Smartcast</div>
               <div className="text-[10px] text-white/60 uppercase tracking-wider">Webinars</div>
@@ -73,13 +78,17 @@ export function AppShell({ children, title = "Home" }: { children: ReactNode; ti
           <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
             <div className="text-sm rounded-full border border-white/10 px-3 py-1 text-white/70">{title}</div>
             <div className="flex items-center gap-2">
-              <Button size="sm" className="bg-violet-600 hover:bg-violet-500">
-                <Zap className="mr-2 h-4 w-4" />
-                Boost
-              </Button>
-              <Button size="sm" variant="secondary" className="rounded-full bg-white/10 hover:bg-white/20 text-white border-white/10" onClick={() => setOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" /> Create Webinar
-              </Button>
+              <m.div whileTap={{ scale: 0.95 }}>
+                <Button size="sm" className="bg-violet-600 hover:bg-violet-500">
+                  <Zap className="mr-2 h-4 w-4" />
+                  Boost
+                </Button>
+              </m.div>
+              <m.div whileTap={{ scale: 0.95 }}>
+                <Button size="sm" variant="secondary" className="rounded-full bg-white/10 hover:bg-white/20 text-white border-white/10" onClick={() => setOpen(true)}>
+                  <Plus className="mr-2 h-4 w-4" /> Create Webinar
+                </Button>
+              </m.div>
             </div>
           </div>
         </div>
