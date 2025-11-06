@@ -50,7 +50,6 @@ export async function createWebinarAction(
 
     // Create webinar on GetStream
     const payload: WebinarCreatePayload = {
-      call_type: 'livestream',
       id: input.webinarId,
       title: input.title,
       description: input.description,
@@ -65,7 +64,7 @@ export async function createWebinarAction(
     }
 
     // Generate token for the user
-    const token = generateUserToken(input.userId, 3600);
+    const token = await generateUserToken(input.userId, 86400); // 24 hours
 
     // Construct join URL
     const joinUrl = `/webinar/${webinarResponse.call.id}`;

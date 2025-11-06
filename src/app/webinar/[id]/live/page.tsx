@@ -8,7 +8,6 @@ import {
   Call,
   StreamCall,
   LivestreamLayout,
-  SpeakerLayout,
   useCallStateHooks,
 } from "@stream-io/video-react-sdk";
 import "@stream-io/video-react-sdk/dist/css/styles.css";
@@ -33,7 +32,7 @@ function useWebinar(id: string) {
   return item;
 }
 
-function LivestreamPlayer({ call }: { call: Call }) {
+function LivestreamPlayer({ call, isHost }: { call: Call; isHost: boolean }) {
   const { useIsCallLive, useParticipantCount } = useCallStateHooks();
   const isLive = useIsCallLive();
   const participantCount = useParticipantCount();
@@ -57,7 +56,9 @@ function LivestreamPlayer({ call }: { call: Call }) {
         <div className="flex h-full items-center justify-center">
           <div className="text-center">
             <Loader2 className="h-8 w-8 animate-spin text-white/60 mx-auto mb-3" />
-            <p className="text-white/80">Waiting for host to start the webinar...</p>
+            <p className="text-white/80">
+              {isHost ? 'Click "Go Live" to start broadcasting' : 'Waiting for host to start the webinar...'}
+            </p>
             <p className="text-white/50 text-sm mt-1">The stream will begin shortly</p>
           </div>
         </div>
@@ -168,10 +169,14 @@ export default function WebinarLivePage() {
         const hasToken = !!webinar.streamToken;
         setIsHost(hasToken);
 
-        // Generate viewer token if needed
-        const userId = hasToken ? `host-${Date.now()}` : `viewer-${Date.now()}`;
+        // Generate unique user ID
+        const userId = hasToken 
+          ? `host-${webinar.id}-${Date.now()}` 
+          : `viewer-${Date.now()}`;
+        
         let token = webinar.streamToken;
 
+        // Generate viewer token if needed
         if (!token) {
           const response = await fetch("/api/stream-token", {
             method: "POST",
@@ -180,11 +185,16 @@ export default function WebinarLivePage() {
           });
 
           if (!response.ok) {
-            throw new Error("Failed to generate token");
+            const errorData = await response.json();
+            throw new Error(errorData.details || "Failed to generate token");
           }
 
           const data = await response.json();
           token = data.token;
+        }
+
+        if (!token) {
+          throw new Error("No token available");
         }
 
         // Initialize Stream client
@@ -203,13 +213,19 @@ export default function WebinarLivePage() {
         const streamCall = streamClient.call("livestream", webinar.streamCallId);
         
         // Join the call
-        await streamCall.join({ create: false });
+        await streamCall.join({ create: hasToken });
         
         setCall(streamCall);
+        
+        if (hasToken) {
+          toast.success("Welcome, Host! Click 'Go Live' to start broadcasting.");
+        } else {
+          toast.success("Connected to webinar. Waiting for host...");
+        }
       } catch (err) {
         console.error("Failed to initialize Stream:", err);
         setError(err instanceof Error ? err.message : "Failed to initialize video");
-        toast.error("Failed to load livestream");
+        toast.error(`Failed to load livestream: ${err instanceof Error ? err.message : 'Unknown error'}`);
       } finally {
         setIsLoading(false);
       }
@@ -243,9 +259,12 @@ export default function WebinarLivePage() {
   if (error || !client || !call) {
     return (
       <div className="h-screen flex items-center justify-center bg-black text-white">
-        <div className="text-center max-w-md">
-          <p className="text-red-400 mb-4">{error || "Failed to load webinar"}</p>
-          <Button onClick={() => router.push("/")}>Go Home</Button>
+        <div className="text-center max-w-md px-4">
+          <div className="text-red-400 mb-4">
+            <p className="font-semibold text-lg mb-2">Failed to Load Webinar</p>
+            <p className="text-sm">{error || "Failed to load webinar"}</p>
+          </div>
+          <Button onClick={() => router.push("/")} variant="outline">Go Home</Button>
         </div>
       </div>
     );
@@ -255,7 +274,7 @@ export default function WebinarLivePage() {
     <StreamVideo client={client}>
       <StreamCall call={call}>
         <div className="h-screen w-full relative bg-black">
-          <LivestreamPlayer call={call} />
+          <LivestreamPlayer call={call} isHost={isHost} />
           {isHost && <HostControls call={call} />}
           
           {/* Back button */}

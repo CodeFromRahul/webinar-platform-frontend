@@ -1,4 +1,5 @@
 import { StreamClient } from '@stream-io/node-sdk';
+import { SignJWT } from 'jose';
 
 const API_KEY = process.env.NEXT_PUBLIC_GETSTREAM_API_KEY!;
 const API_SECRET = process.env.GETSTREAM_API_SECRET!;
@@ -12,11 +13,8 @@ function getStreamClient(): StreamClient {
       throw new Error('GetStream credentials not configured. Please set NEXT_PUBLIC_GETSTREAM_API_KEY and GETSTREAM_API_SECRET in your .env file.');
     }
     
-    // Correct initialization with object containing apiKey and secret
-    client = new StreamClient({
-      apiKey: API_KEY,
-      secret: API_SECRET,
-    });
+    // Correct initialization: StreamClient takes two separate parameters
+    client = new StreamClient(API_KEY, API_SECRET);
   }
   return client;
 }
@@ -39,75 +37,110 @@ export interface WebinarResponse {
       id: string;
       name?: string;
     };
-    backstage: {
-      enabled: boolean;
-    };
   };
 }
 
-// Generate JWT token for user
-export function generateUserToken(userId: string, expiresIn?: number): string {
+// Generate JWT token for user using jose library
+export async function generateUserToken(userId: string, expiresIn: number = 3600): Promise<string> {
   try {
-    const streamClient = getStreamClient();
-    
-    // If expiresIn is provided, use it (in seconds)
-    if (expiresIn) {
-      const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
-      return streamClient.createToken(userId, expiresAt);
+    if (!API_SECRET) {
+      throw new Error('GETSTREAM_API_SECRET is not configured');
     }
-    
-    // Otherwise, create token without expiration
-    return streamClient.createToken(userId);
+
+    const secret = new TextEncoder().encode(API_SECRET);
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const expirationTime = issuedAt + expiresIn;
+
+    const token = await new SignJWT({
+      user_id: userId,
+      iss: 'https://getstream.io',
+      sub: userId,
+      aud: API_KEY,
+    })
+      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+      .setIssuedAt(issuedAt)
+      .setExpirationTime(expirationTime)
+      .sign(secret);
+
+    return token;
   } catch (error) {
     console.error('Failed to generate user token:', error);
     throw error;
   }
 }
 
-// Create webinar/livestream call
+// Create webinar/livestream call using REST API
 export async function createWebinar(
   payload: WebinarCreatePayload
 ): Promise<WebinarResponse> {
   try {
     const streamClient = getStreamClient();
     
-    // Create a livestream call using correct API
-    const call = streamClient.video.call('livestream', payload.id);
-    
-    await call.getOrCreate({
-      data: {
-        created_by_id: payload.created_by_user_id,
-        settings_override: {
-          backstage: {
-            enabled: true,
-          },
-          broadcasting: {
-            enabled: true,
-          },
-        },
-        custom: {
-          title: payload.title || 'Untitled Webinar',
-          description: payload.description || '',
-        },
-        starts_at: payload.starts_at,
-      },
-    });
+    const callType = 'livestream';
+    const callId = payload.id;
 
-    // Get the call details
-    const callResponse = await call.get();
+    // Create call using REST API
+    const response = await streamClient.post(
+      `/video/call/${callType}/${callId}`,
+      {
+        data: {
+          created_by_id: payload.created_by_user_id,
+          settings_override: {
+            backstage: {
+              enabled: true,
+            },
+            broadcasting: {
+              enabled: true,
+            },
+          },
+          custom: {
+            title: payload.title || 'Untitled Webinar',
+            description: payload.description || '',
+          },
+          starts_at: payload.starts_at,
+        },
+      }
+    );
 
     return {
       call: {
-        id: callResponse.call.id,
-        type: callResponse.call.type,
-        created_at: callResponse.call.created_at,
-        updated_at: callResponse.call.updated_at,
-        created_by: callResponse.call.created_by,
-        backstage: callResponse.call.settings.backstage,
+        id: response.call.id,
+        type: response.call.type,
+        created_at: response.call.created_at,
+        updated_at: response.call.updated_at,
+        created_by: response.call.created_by,
+      },
+    };
+  } catch (error: any) {
+    // If call already exists, try to get it
+    if (error?.code === 16 || error?.statusCode === 409) {
+      console.log('Call already exists, fetching existing call...');
+      return await getWebinar(payload.id);
+    }
+    console.error('Failed to create webinar:', error);
+    throw error;
+  }
+}
+
+// Get existing webinar call
+export async function getWebinar(callId: string): Promise<WebinarResponse> {
+  try {
+    const streamClient = getStreamClient();
+    const callType = 'livestream';
+
+    const response = await streamClient.get(`/video/call/${callType}/${callId}`);
+
+    return {
+      call: {
+        id: response.call.id,
+        type: response.call.type,
+        created_at: response.call.created_at,
+        updated_at: response.call.updated_at,
+        created_by: response.call.created_by,
       },
     };
   } catch (error) {
-    console.error('Failed to create webinar:', error);
+    console.error('Failed to get webinar:', error);
     throw error;
   }
 }
@@ -119,10 +152,9 @@ export async function startWebinar(
 ): Promise<void> {
   try {
     const streamClient = getStreamClient();
-    const call = streamClient.video.call('livestream', callId);
+    const callType = 'livestream';
 
-    // Go live
-    await call.goLive();
+    await streamClient.post(`/video/call/${callType}/${callId}/go_live`, {});
   } catch (error) {
     console.error('Failed to start webinar:', error);
     throw error;
@@ -136,10 +168,9 @@ export async function stopWebinar(
 ): Promise<void> {
   try {
     const streamClient = getStreamClient();
-    const call = streamClient.video.call('livestream', callId);
+    const callType = 'livestream';
 
-    // Stop live
-    await call.stopLive();
+    await streamClient.post(`/video/call/${callType}/${callId}/stop_live`, {});
   } catch (error) {
     console.error('Failed to stop webinar:', error);
     throw error;
