@@ -7,22 +7,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CalendarDays, Clock, Copy, CheckCircle2 } from "lucide-react";
+import { CalendarDays, Clock, Copy, CheckCircle2, Loader2, AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion as m } from "framer-motion";
+import { createWebinarAction } from "@/app/actions/webinar";
+import { toast } from "sonner";
 
 export type Webinar = {
   id: string;
   name: string;
   description: string;
-  date: string; // ISO date (yyyy-mm-dd)
-  time: string; // HH:mm
+  date: string;
+  time: string;
   period: "AM" | "PM";
   ctaLabel?: string;
   tags?: string;
   ctaType?: "book" | "buy";
   product?: string;
   thumbnail?: string;
+  streamCallId?: string;
+  streamToken?: string;
 };
 
 function saveWebinar(w: Webinar) {
@@ -36,6 +40,7 @@ export function WebinarModal({ open, onOpenChange }: { open: boolean; onOpenChan
   const router = useRouter();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<Webinar>({
     id: "",
     name: "",
@@ -54,28 +59,76 @@ export function WebinarModal({ open, onOpenChange }: { open: boolean; onOpenChan
     if (!open) {
       setStep(1);
       setLoading(false);
+      setError(null);
       setData((d) => ({ ...d, id: "", name: "", description: "", date: "", time: "12:00", period: "AM", ctaLabel: "", tags: "", product: "" }));
     }
   }, [open]);
 
   const canNext1 = useMemo(() => data.name.trim() && data.description.trim() && data.date && data.time, [data]);
 
-  function handleCreate() {
+  async function handleCreate() {
     setLoading(true);
-    const id = crypto.randomUUID();
-    const record: Webinar = { ...data, id };
-    saveWebinar(record);
-    setData((d) => ({ ...d, id }));
-    // Small delay to mimic request
-    setTimeout(() => {
-      setLoading(false);
+    setError(null);
+
+    try {
+      const id = crypto.randomUUID();
+      const webinarId = `webinar-${Date.now()}`;
+      const userId = `user-${Date.now()}`; // In production, use actual authenticated user ID
+
+      // Combine date and time for starts_at
+      let startsAt: string | undefined;
+      if (data.date && data.time) {
+        const [hours, minutes] = data.time.split(':');
+        let hour = parseInt(hours);
+        if (data.period === 'PM' && hour !== 12) hour += 12;
+        if (data.period === 'AM' && hour === 12) hour = 0;
+        const dateTime = new Date(data.date);
+        dateTime.setHours(hour, parseInt(minutes), 0, 0);
+        startsAt = dateTime.toISOString();
+      }
+
+      // Create webinar via Stream API
+      const result = await createWebinarAction({
+        webinarId,
+        title: data.name,
+        description: data.description,
+        userId,
+        startsAt,
+      });
+
+      if (!result.success) {
+        setError(result.error || 'Failed to create webinar');
+        toast.error(result.error || 'Failed to create webinar');
+        setLoading(false);
+        return;
+      }
+
+      // Save to localStorage with Stream data
+      const record: Webinar = {
+        ...data,
+        id,
+        streamCallId: result.callId,
+        streamToken: result.token,
+      };
+      
+      saveWebinar(record);
+      setData(record);
+      
+      toast.success('Webinar created successfully!');
       setStep(4);
-    }, 600);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'An error occurred';
+      setError(errorMsg);
+      toast.error(errorMsg);
+    } finally {
+      setLoading(false);
+    }
   }
 
   function copyLink() {
     const url = `${location.origin}/webinar/${data.id || "preview"}`;
     navigator.clipboard.writeText(url);
+    toast.success('Link copied to clipboard!');
   }
 
   return (
@@ -102,6 +155,17 @@ export function WebinarModal({ open, onOpenChange }: { open: boolean; onOpenChan
                   {step === 3 && "Please fill out additional options if necessary"}
                 </p>
               </DialogHeader>
+
+              {error && (
+                <m.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center gap-2 rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-400"
+                >
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <span>{error}</span>
+                </m.div>
+              )}
 
               {step === 1 && (
                 <div className="grid gap-4 pt-2">
@@ -163,11 +227,11 @@ export function WebinarModal({ open, onOpenChange }: { open: boolean; onOpenChan
                   <div className="grid gap-2">
                     <Label>CTA Type</Label>
                     <div className="flex gap-2">
-                      <m.div whileTap={{ scale: 0.98 }}>
-                        <Button variant={data.ctaType === "book" ? "default" : "secondary"} onClick={() => setData({ ...data, ctaType: "book" })}>Book a Call</Button>
+                      <m.div whileTap={{ scale: 0.98 }} className="flex-1">
+                        <Button className="w-full" variant={data.ctaType === "book" ? "default" : "secondary"} onClick={() => setData({ ...data, ctaType: "book" })}>Book a Call</Button>
                       </m.div>
-                      <m.div whileTap={{ scale: 0.98 }}>
-                        <Button variant={data.ctaType === "buy" ? "default" : "secondary"} onClick={() => setData({ ...data, ctaType: "buy" })}>Buy Now</Button>
+                      <m.div whileTap={{ scale: 0.98 }} className="flex-1">
+                        <Button className="w-full" variant={data.ctaType === "buy" ? "default" : "secondary"} onClick={() => setData({ ...data, ctaType: "buy" })}>Buy Now</Button>
                       </m.div>
                     </div>
                   </div>
@@ -206,7 +270,16 @@ export function WebinarModal({ open, onOpenChange }: { open: boolean; onOpenChan
                       <Button variant="secondary" onClick={() => setStep(2)}>Back</Button>
                     </m.div>
                     <m.div whileTap={{ scale: 0.98 }}>
-                      <Button onClick={handleCreate} disabled={loading}>{loading ? "Creating..." : "Create"}</Button>
+                      <Button onClick={handleCreate} disabled={loading}>
+                        {loading ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Creating...
+                          </>
+                        ) : (
+                          'Create'
+                        )}
+                      </Button>
                     </m.div>
                   </div>
                 </div>
@@ -221,27 +294,35 @@ export function WebinarModal({ open, onOpenChange }: { open: boolean; onOpenChan
               transition={{ duration: 0.2, ease: "easeOut" }}
               className="py-8 text-center"
             >
-              <CheckCircle2 className="mx-auto mb-4 h-10 w-10 text-green-500" />
+              <m.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ delay: 0.1, type: "spring", stiffness: 200 }}
+              >
+                <CheckCircle2 className="mx-auto mb-4 h-10 w-10 text-green-500" />
+              </m.div>
               <h3 className="text-xl font-medium">Your webinar has been created</h3>
               <p className="mt-1 text-sm text-white/60">You can share the link with your viewers for them to join</p>
               <div className="mt-4 flex items-center justify-center gap-2">
-                <div className="rounded-md bg-white/5 px-3 py-2 text-sm">{typeof window !== "undefined" ? `${location.origin}/webinar/${data.id}` : ""}</div>
+                <div className="rounded-md bg-white/5 px-3 py-2 text-sm break-all">{typeof window !== "undefined" ? `${location.origin}/webinar/${data.id}` : ""}</div>
                 <m.div whileTap={{ scale: 0.96 }}>
                   <Button size="icon" variant="secondary" className="bg-white/10 hover:bg-white/20 text-white border-white/10" onClick={copyLink}><Copy className="h-4 w-4" /></Button>
                 </m.div>
               </div>
+              {data.streamCallId && (
+                <div className="mt-3 text-xs text-white/50">
+                  Stream Call ID: {data.streamCallId}
+                </div>
+              )}
               <div className="mt-6 flex justify-center gap-2">
                 <m.div whileTap={{ scale: 0.98 }}>
                   <Button onClick={() => {
-                    const id = crypto.randomUUID();
-                    const record = { ...data, id } as Webinar;
-                    saveWebinar(record);
-                    router.push(`/webinar/${id}`);
+                    router.push(`/webinar/${data.id}`);
                     onOpenChange(false);
                   }}>Preview Webinar</Button>
                 </m.div>
                 <m.div whileTap={{ scale: 0.98 }}>
-                  <Button variant="secondary" className="bg-white/10 hover:bg-white/20 text-white border-white/10" onClick={() => { setStep(1); }}>Create Another Webinar</Button>
+                  <Button variant="secondary" className="bg-white/10 hover:bg-white/20 text-white border-white/10" onClick={() => { setStep(1); setError(null); }}>Create Another Webinar</Button>
                 </m.div>
               </div>
             </m.div>
